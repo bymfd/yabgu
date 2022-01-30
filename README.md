@@ -1,7 +1,7 @@
 # yabgu
-Zerossl acme client for apache and plesk panels usable *nix and Windows 
+Zerossl acme client for apache and plesk panels usable *nix and Windows (Work in progress)
 
-
+if you have any issue pls write.
 
 ## How to use:
  - Clone this repo
