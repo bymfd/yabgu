@@ -173,7 +173,7 @@ subjectAltName = {self.certificateDomain}'''
         shutil.move(f'{self.certificateDomain}_key.pem',
                     f'{config["konumlar"]["key_dir"]}{path_sep}{self.commonName}_key.pem')
         # install cert to plesk
-        if config["diger"]["deploy_plesk"] == "plesk":
+        if config["diger"]["deploy"] == "plesk":
             subprocess.Popen(['plesk', 'bin', 'certificate', '-c',
                               'zero_{self.certificateDomain}_{d1}',
                               '-domain ', '{self.certificateDomain}',
