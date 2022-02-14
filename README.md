@@ -31,5 +31,4 @@ if you have any issue pls write.
 ## TODO:
 - write more detailed how to use.
 - Revoke certs.
-- List added certs.
 - More handle api errors
