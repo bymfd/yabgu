@@ -1,3 +1,4 @@
+from distutils.log import error
 import requests
 import subprocess
 import json
@@ -10,22 +11,60 @@ import glob
 import tldextract
 import argparse
 import sys
+import os
 from sys import platform as _platform
 from datetime import date
 import logging
+import sqlite3 as sql
 
 # Suppress https warning (Burp)
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 config = configparser.ConfigParser()
 config.read('config.ini')
+today = date.today()
+
+
+def db(procedure=0, values=[]):
+    try:
+        con = sql.connect("yabgu.db")
+        sql_create_table = """ CREATE TABLE IF NOT EXISTS certs (
+                                        id text NOT NULL,
+                                        domains text NOT NULL,
+                                        create_date DATE DEFAULT (datetime('now','localtime'))
+                                    ); """
+
+        con.execute(sql_create_table)
+
+        if procedure == 1:
+            cursor = con.cursor()
+            sql_insert_query = """INSERT INTO certs
+                          (id, domains) 
+                           VALUES 
+                          ('{val0}','{val1}')""".format(val0=values[0],val1=values[1])
+
+            count = cursor.execute(sql_insert_query)
+            con.commit()
+            print(str(cursor.rowcount)+" Başarılı şekilde kaydedildi")
+            cursor.close()
+        elif procedure ==2:
+                cursor = con.cursor()
+                cursor.execute("SELECT * FROM certs")
+                return cursor.fetchall()
+    except Exception as e:
+        print(e)
+
 
 parser = argparse.ArgumentParser(
     description='Yabgu - Zerossl - apache ve plesk icin SSL sertifika yoneticisi'
 )
-parser.add_argument('-s', '--site', metavar='site', required=False, help='Kayit edilecek domain')
-parser.add_argument('-l', '--list', metavar='list', required=False, help='Kayitli domain listesi')
-parser.add_argument('-r', '--renew', metavar='renew', required=False, help='Kayitli domainleri yenile')
-parser.add_argument('-rm', '--remove', metavar='remove', required=False, help='Kayitli domaini revoke et ve sil')
+parser.add_argument('-s', '--site', metavar='site',
+                    required=False, help='Kayit edilecek domain')
+parser.add_argument('-l', '--list', metavar='list',
+                    required=False, help='Kayitli domain listesi')
+parser.add_argument('-r', '--renew', metavar='renew',
+                    required=False, help='Kayitli domainleri yenile')
+parser.add_argument('-rm', '--remove', metavar='remove',
+                    required=False, help='Kayitli domaini revoke et ve sil')
 
 args = parser.parse_args()
 path_sep = "\\"
@@ -38,11 +77,12 @@ elif _platform == "win32":
     path_sep = "\\"
 elif _platform == "win64":
     path_sep = "\\"
-today = date.today()
+
 d1 = today.strftime("%m.%Y")
 
 domain = ''
 domains = ""
+status = ""
 logging.basicConfig(filename=f'log{path_sep}yabgu-' + today.strftime("%d-%m-%Y") + '.log',
                     format='%(asctime)s %(message)s',
                     level=logging.DEBUG)
@@ -53,7 +93,7 @@ logging.debug(args)
 class SSLCertReNew(object):
 
     def __init__(self):
-        global domain, domains
+        global domain, domains, status
         self.url = config['oturum']['api_end_point']
         self.proxies = None
         self.apiKey = config['oturum']['api_key']
@@ -71,7 +111,8 @@ class SSLCertReNew(object):
         self.certificateDomain = ""
         self.commonName = ""
         self.requestSites = ""
-        self.organization=""
+        self.organization = ""
+        self.status = 0
         self.makeDomain()
         self.csr = self.createCsr()
         # run steps
@@ -85,13 +126,14 @@ class SSLCertReNew(object):
     def makeDomain(self):
         print(domains)
         self.commonName = domains[0].strip()
-        self.certificateDomain = "DNS: " + domain.replace(",", ",DNS: ").strip()
+        self.certificateDomain = "DNS: " + \
+            domain.replace(",", ",DNS: ").strip()
         self.requestSites = domain.strip()
-        self.organization=tldextract.extract(self.commonName)
+        self.organization = tldextract.extract(self.commonName)
         # print(self.commonName)
         # print(self.certificateDomain)
         # print(self.requestSites)
-
+        
     def createCsr(self):
         logging.debug("crt create")
         req = f'''
@@ -148,14 +190,18 @@ subjectAltName = {self.certificateDomain}'''
             self.certHash = result['id']
             logging.debug("cert id" + result["id"])
         else:
-            print("error " + str(result["error"]["code"]) + " : " + result["error"]["type"])
-            logging.debug("error " + str(result["error"]["code"]) + " : " + result["error"]["type"])
+            print("error " + str(result["error"]["code"]
+                                 ) + " : " + result["error"]["type"])
+            logging.debug(
+                "error " + str(result["error"]["code"]) + " : " + result["error"]["type"])
             logging.debug("exit")
             sys.exit()
        # self.certHash = result['id']
         # url from json
-        self.HttpsUrl = result['validation']['other_methods'][f'{self.commonName}']['file_validation_url_https']
-        self.HttpsContent = result['validation']['other_methods'][f'{self.commonName}']['file_validation_content']
+        self.HttpsUrl = result['validation']['other_methods'][
+            f'{self.commonName}']['file_validation_url_https']
+        self.HttpsContent = result['validation']['other_methods'][
+            f'{self.commonName}']['file_validation_content']
         self.dirOne = self.HttpsUrl.split('/')[-3]
         self.dirTwo = self.HttpsUrl.split('/')[-2]
         self.fileName = self.HttpsUrl.split('/')[-1]
@@ -191,27 +237,31 @@ subjectAltName = {self.certificateDomain}'''
         ca_bundle = result['ca_bundle.crt']
         cert = result['certificate.crt']
 
-        f = open('{config["konumlar"]["cert_dir"]}{path_sep}{self.commonName}_cert.pem', 'w+')
+        f = open(
+            '{config["konumlar"]["cert_dir"]}{path_sep}{self.commonName}_cert.pem', 'w+')
         f.write(cert)
         f.close()
 
-        f = open('{config["konumlar"]["cert_dir"]}{path_sep}{self.commonName}_ca.pem', 'w+')
+        f = open(
+            '{config["konumlar"]["cert_dir"]}{path_sep}{self.commonName}_ca.pem', 'w+')
         f.write(ca_bundle)
         f.close()
         # move private key
-        shutil.move(f'{self.certificateDomain}_key.pem',
+        shutil.move(f'{self.commonName}_key.pem',
                     f'{config["konumlar"]["key_dir"]}{path_sep}{self.commonName}_key.pem')
         # install cert to plesk
         if config["diger"]["deploy"] == "plesk":
             subprocess.Popen(['plesk', 'bin', 'certificate', '-c',
-                              'zero_{self.certificateDomain}_{d1}',
-                              '-domain ', '{self.certificateDomain}',
+                              'zero_{self.commonName}_{d1}',
+                              '-domain ', '{self.commonName}',
                               '-cert-file', '{config["konumlar"]["cert_dir"]}{path_sep}{self.commonName}_cert.pem',
                               '-cacert-file', '{config["konumlar"]["cert_dir"]}{path_sep}{self.commonName}_ca.pem'])
 
-        # delete files in site/.wellknown/pki-verification
-        files = glob.glob(
-            f'{config["konumlar"]["site_dir"]}{path_sep}{self.commonName}{path_sep}{config["konumlar"]["site_doc_dir"]}{path_sep}{self.dirOne}{path_sep}{self.dirTwo}{path_sep}*')
+        db(1, [self.certHash, self.requestSites])
+
+        # delete files
+        #         files = glob.glob(
+        f'{config["konumlar"]["site_dir"]}{path_sep}{self.commonName}{path_sep}{config["konumlar"]["site_doc_dir"]}{path_sep}{self.dirOne}{path_sep}{self.dirTwo}{path_sep}*'
         for f in files:
             os.remove(f)
 
@@ -227,12 +277,9 @@ class SSLCertReNewControl(object):
 
 class SSLCertReNewList(object):
     def __init__(self):
-        print("Bu parametre gelistirme asamasinda\n"
-              "*********\n"
-              "Yabgu\n"
-              "*********\n"
-              )
-
+        rows =db(2,[])
+        for i in rows:
+            print(i)
 
 class SSLCertRemove(object):
     def __init__(self):
